@@ -2,14 +2,10 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Check,
   CheckCircle2,
   ChevronRight,
-  Download,
-  Eye,
   FileText,
   Info,
-  MousePointerClick,
   Trash2,
   UploadCloud,
 } from "lucide-react";
@@ -19,209 +15,251 @@ import { useCallback, useRef, useState } from "react";
 export default function WordToPdfPage() {
   const [file, setFile] = useState<File | null>(null);
   const [isConverting, setIsConverting] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
+  const [isPdfReady, setIsPdfReady] = useState(false);
   const [showToast, setShowToast] = useState(false);
-  const [isRendered, setIsRendered] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const previewContainerRef = useRef<HTMLDivElement>(null);
-  const docxBlobRef = useRef<Blob | null>(null);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
-
     setFile(selectedFile);
-    setIsConverting(true);
-    setIsRendered(false);
-
-    try {
-      // Dynamically import docx-preview (client-side only)
-      const docxPreview = await import("docx-preview");
-
-      const arrayBuffer = await selectedFile.arrayBuffer();
-      const blob = new Blob([arrayBuffer]);
-      docxBlobRef.current = blob;
-
-      // Clear previous preview
-      if (previewContainerRef.current) {
-        previewContainerRef.current.innerHTML = "";
-      }
-
-      // Render the DOCX into the preview container
-      await docxPreview.renderAsync(blob, previewContainerRef.current!, undefined, {
-        className: "docx",
-        inWrapper: true,
-        ignoreWidth: false,
-        ignoreHeight: false,
-        ignoreFonts: false,
-        breakPages: true,
-        ignoreLastRenderedPageBreak: true,
-        experimental: false,
-        trimXmlDeclaration: true,
-        useBase64URL: true,
-      });
-
-      setIsRendered(true);
-    } catch (error) {
-      console.error("Error rendering DOCX:", error);
-      if (previewContainerRef.current) {
-        previewContainerRef.current.innerHTML =
-          '<p style="color: red; padding: 2rem;">Error loading document. Please ensure it is a valid .docx file.</p>';
-      }
-    } finally {
-      setIsConverting(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+    setIsPdfReady(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
-  const handleExportPdf = useCallback(async () => {
-    if (!isRendered || !file || !previewContainerRef.current) return;
-    setIsExporting(true);
+  const handleConvert = useCallback(async () => {
+    if (!file) return;
+    setIsConverting(true);
 
     try {
-      // Gather the rendered HTML and styles from the preview container
-      const renderedHTML = previewContainerRef.current.innerHTML;
+      // Read the DOCX file as ArrayBuffer
+      const arrayBuffer = await file.arrayBuffer();
 
-      // Collect all style tags that docx-preview injected
-      const styleElements = previewContainerRef.current.querySelectorAll("style");
-      let styles = "";
-      styleElements.forEach((el) => {
-        styles += el.outerHTML;
-      });
+      // Import mammoth for DOCX to HTML conversion
+      const mammoth = await import("mammoth");
 
-      // Build a standalone HTML document for printing
-      const printHTML = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>${file.name.replace(/\.docx$/i, "")}</title>
-  ${styles}
-  <style>
-    /* Reset */
-    *, *::before, *::after {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+      // Convert DOCX to HTML using mammoth
+      // Mammoth preserves inline styles like colors, fonts, and background colors
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      let html = result.value;
 
-    html, body {
-      width: 100%;
-      height: auto;
-      background: #fff;
-      color: #000;
-      font-family: 'Calibri', 'Arial', sans-serif;
-    }
-
-    /* Page setup for print */
-    @page {
-      size: A4;
-      margin: 0;
-    }
-
-    /* docx-preview wrapper section styling */
-    .docx-wrapper {
-      background: #fff !important;
-      padding: 0 !important;
-    }
-
-    .docx-wrapper > section.docx {
-      box-shadow: none !important;
-      margin: 0 auto !important;
-      padding: 1in !important;
-      min-height: auto !important;
-    }
-
-    /* Print-specific overrides */
-    @media print {
-      body {
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
+      // Extract any warnings about unsupported features
+      if (result.messages && result.messages.length > 0) {
+        console.log("Mammoth conversion messages:", result.messages);
       }
 
-      .docx-wrapper {
-        background: #fff !important;
-        padding: 0 !important;
-      }
+      // Import html2pdf for PDF generation
+      const html2pdf = await import("html2pdf.js");
 
-      .docx-wrapper > section.docx {
-        box-shadow: none !important;
-        margin: 0 !important;
-        page-break-after: always;
-        width: 100% !important;
-      }
+      // Comprehensive CSS styling that respects document properties
+      const cssStyles = `
+        <style>
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+          html, body, div, section {
+            font-family: 'Calibri', 'Arial', 'Cambria', 'Times New Roman', sans-serif;
+            color: inherit;
+            background-color: transparent;
+          }
+          p {
+            margin: 0.5em 0;
+            line-height: 1.6;
+            font-size: 11pt;
+            color: inherit;
+            font-family: inherit;
+          }
+          h1 {
+            font-size: 2.5em;
+            margin: 0.8em 0 0.3em 0;
+            font-weight: bold;
+            color: inherit;
+            page-break-after: avoid;
+            line-height: 1.2;
+            font-family: inherit;
+          }
+          h2 {
+            font-size: 2em;
+            margin: 0.6em 0 0.25em 0;
+            font-weight: bold;
+            color: inherit;
+            page-break-after: avoid;
+            line-height: 1.2;
+            font-family: inherit;
+          }
+          h3 {
+            font-size: 1.75em;
+            margin: 0.4em 0 0.2em 0;
+            font-weight: bold;
+            color: inherit;
+            page-break-after: avoid;
+            line-height: 1.2;
+            font-family: inherit;
+          }
+          h4 {
+            font-size: 1.5em;
+            margin: 0.3em 0;
+            font-weight: bold;
+            color: inherit;
+            page-break-after: avoid;
+            font-family: inherit;
+          }
+          h5 {
+            font-size: 1.25em;
+            margin: 0.2em 0;
+            font-weight: bold;
+            color: inherit;
+            page-break-after: avoid;
+            font-family: inherit;
+          }
+          h6 {
+            font-size: 1.1em;
+            margin: 0.2em 0;
+            font-weight: bold;
+            color: inherit;
+            page-break-after: avoid;
+            font-family: inherit;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.8em 0;
+            font-size: 10pt;
+          }
+          td, th {
+            border: 1px solid #999;
+            padding: 8px;
+            text-align: left;
+            color: inherit;
+            background-color: inherit;
+            font-family: inherit;
+          }
+          th {
+            background-color: #e6e6e6;
+            font-weight: bold;
+          }
+          ul {
+            list-style-type: disc;
+            margin: 0.5em 0 0.5em 2em;
+          }
+          ol {
+            list-style-type: decimal;
+            margin: 0.5em 0 0.5em 2em;
+          }
+          li {
+            margin: 0.3em 0;
+            line-height: 1.5;
+            color: inherit;
+            font-family: inherit;
+          }
+          strong, b {
+            font-weight: bold;
+            color: inherit;
+            font-family: inherit;
+          }
+          em, i {
+            font-style: italic;
+            color: inherit;
+            font-family: inherit;
+          }
+          u {
+            text-decoration: underline;
+            color: inherit;
+            font-family: inherit;
+          }
+          span {
+            color: inherit;
+            background-color: inherit;
+            font-size: inherit;
+            font-family: inherit;
+          }
+          img {
+            max-width: 100%;
+            height: auto;
+            margin: 0.5em 0;
+          }
+          blockquote {
+            margin-left: 2em;
+            padding-left: 1em;
+            border-left: 3px solid #ccc;
+            color: inherit;
+            font-family: inherit;
+          }
+          code {
+            background-color: #f5f5f5;
+            padding: 2px 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: inherit;
+          }
+          pre {
+            background-color: #f5f5f5;
+            padding: 1em;
+            margin: 0.5em 0;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: inherit;
+          }
+          hr {
+            border: none;
+            border-top: 1px solid #ccc;
+            margin: 1em 0;
+          }
+        </style>
+      `;
 
-      .docx-wrapper > section.docx:last-child {
-        page-break-after: auto;
-      }
+      // Create a temporary container preserving document background and colors
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = cssStyles + `<div>${html}</div>`;
+      tempDiv.style.backgroundColor = "transparent";
+      tempDiv.style.color = "inherit";
 
-      /* Avoid breaking inside important elements */
-      table { page-break-inside: avoid; }
-      img { page-break-inside: avoid; }
-      p { orphans: 3; widows: 3; }
-      h1, h2, h3, h4, h5, h6 {
-        page-break-after: avoid;
-        orphans: 3;
-        widows: 3;
-      }
-    }
-
-    /* Screen-only: show pages nicely for the brief moment before print */
-    @media screen {
-      body {
-        background: #fff;
-      }
-      .docx-wrapper > section.docx {
-        margin: 0 auto;
-      }
-    }
-  </style>
-</head>
-<body>
-  ${renderedHTML}
-</body>
-</html>`;
-
-      // Open a new window and trigger print (which allows "Save as PDF")
-      const printWindow = window.open("", "_blank", "width=900,height=700");
-      if (!printWindow) {
-        alert("Please allow popups for this site to download the PDF.");
-        return;
-      }
-
-      printWindow.document.write(printHTML);
-      printWindow.document.close();
-
-      // Wait for content + images/fonts to load before printing
-      printWindow.onload = () => {
-        setTimeout(() => {
-          printWindow.focus();
-          printWindow.print();
-          // Close after a delay to ensure print dialog completes
-          setTimeout(() => {
-            printWindow.close();
-          }, 1000);
-        }, 500);
+      // Configure PDF options with transparent background to preserve document styling
+      const opt = {
+        margin: 10,
+        filename: file.name.replace(/\.docx$/i, ".pdf"),
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          allowTaint: true,
+          backgroundColor: null,
+          letterRendering: true,
+        },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
       };
 
+      // Generate and save PDF
+      const pdfGenerator = html2pdf.default;
+      await pdfGenerator().set(opt).from(tempDiv).save();
+
+      setIsPdfReady(true);
       setShowToast(true);
       setTimeout(() => setShowToast(false), 3500);
     } catch (error) {
-      console.error("Export failed:", error);
+      console.error("Conversion failed:", error);
+      alert(
+        "Failed to convert document. Please ensure it is a valid .docx file.",
+      );
     } finally {
-      setIsExporting(false);
+      setIsConverting(false);
     }
-  }, [isRendered, file]);
+  }, [file]);
+
+  const handleDownload = useCallback(() => {
+    // PDF is automatically downloaded via html2pdf.save()
+    // This function is kept for compatibility but not needed
+  }, []);
 
   const handleClear = useCallback(() => {
     setFile(null);
-    setIsRendered(false);
-    docxBlobRef.current = null;
-    if (previewContainerRef.current) {
-      previewContainerRef.current.innerHTML = "";
-    }
+    setIsPdfReady(false);
   }, []);
 
   return (
@@ -243,10 +281,10 @@ export default function WordToPdfPage() {
             <CheckCircle2 className="w-5 h-5 text-green-400" />
             <div>
               <p className="text-sm font-bold text-green-300">
-                Print dialog opened!
+                Conversion Complete!
               </p>
               <p className="text-xs text-green-400/70 font-medium">
-                Select &quot;Save as PDF&quot; as the destination to download your PDF
+                Your PDF is ready to download
               </p>
             </div>
           </motion.div>
@@ -268,156 +306,81 @@ export default function WordToPdfPage() {
           <span className="text-white font-bold">Word to PDF</span>
         </motion.nav>
 
-        {/* Toolbar */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-surface border border-border text-sm font-bold text-white hover:bg-white/5 transition-all"
-              title="Upload a .docx file"
-            >
-              <UploadCloud className="w-4 h-4" />
-              <span>Select Word Document</span>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              onChange={handleFileChange}
-              className="hidden"
-              id="file-import"
-            />
-
-            <button
-              onClick={handleClear}
-              disabled={!isRendered}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass text-sm font-bold text-muted-foreground hover:text-red-400 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Clear preview"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span className="hidden sm:inline">Clear</span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {file && (
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10">
-                <FileText className="w-4 h-4 text-rose-400" />
-                <span className="text-sm font-medium text-white max-w-[200px] truncate">
-                  {file.name}
-                </span>
-              </div>
-            )}
-
-            {/* Export Button */}
-            <button
-              onClick={handleExportPdf}
-              disabled={isExporting || !isRendered || isConverting}
-              className={`group flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-base font-bold transition-all duration-300 ${
-                isExporting
-                  ? "bg-green-500/20 text-green-400 cursor-wait"
-                  : isRendered
-                    ? "bg-gradient-to-r from-red-500 to-rose-600 text-white hover:shadow-[0_0_30px_rgba(225,29,72,0.35)] hover:scale-[1.03] active:scale-[0.97] animate-pulse-glow"
-                    : "bg-white/5 text-muted-foreground cursor-not-allowed"
-              } disabled:opacity-40 disabled:cursor-not-allowed disabled:animate-none`}
-              id="export-button"
-            >
-              {isExporting ? (
-                <>
-                  <Check className="w-5 h-5" />
-                  Opening Print...
-                </>
-              ) : (
-                <>
-                  <Download className="w-5 h-5" />
-                  Download PDF
-                  <MousePointerClick className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 transition-opacity" />
-                </>
-              )}
-            </button>
-          </div>
-        </motion.div>
-
-        {/* Content Area */}
+        {/* Main Content */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
           className="mt-6 flex flex-col rounded-2xl border border-border overflow-hidden bg-[#0d0d15]"
-          style={{ minHeight: "calc(100vh - 28rem)" }}
+          style={{ minHeight: "50vh" }}
         >
-          {/* Header */}
-          <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-surface">
-            <div className="flex items-center gap-2">
-              <div className="flex gap-1.5">
-                <div className="w-3 h-3 rounded-full bg-red-500/60" />
-                <div className="w-3 h-3 rounded-full bg-yellow-500/60" />
-                <div className="w-3 h-3 rounded-full bg-green-500/60" />
-              </div>
-              <span className="text-sm font-bold text-muted-foreground ml-2">
-                <Eye className="w-4 h-4 inline mr-1.5" />
-                Document Preview
-              </span>
+          {/* Content */}
+          <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+            <div className="w-20 h-20 rounded-3xl bg-surface border border-border flex items-center justify-center mb-6 shadow-xl">
+              <UploadCloud className="w-10 h-10 text-muted-foreground/50" />
             </div>
-            {isConverting && (
-              <span className="text-xs font-semibold text-rose-400 animate-pulse">
-                Rendering document...
-              </span>
+            <h3 className="text-2xl font-bold text-white mb-3">
+              Convert Word to PDF
+            </h3>
+            <p className="text-muted-foreground mb-8 max-w-md">
+              Select a .docx file, click convert, and download your PDF
+              instantly
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-3 items-center">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-6 py-3 rounded-xl bg-surface border border-border text-sm font-bold text-white hover:bg-white/5 transition-all"
+                title="Upload a .docx file"
+              >
+                <UploadCloud className="w-4 h-4" />
+                <span>Select Word Document</span>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={handleFileChange}
+                className="hidden"
+                id="file-import"
+              />
+
+              {file && (
+                <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/5 border border-white/10">
+                  <FileText className="w-4 h-4 text-rose-400" />
+                  <span className="text-sm font-medium text-white truncate">
+                    {file.name}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {file && (
+              <div className="mt-8 flex flex-wrap gap-3 justify-center">
+                <button
+                  onClick={handleConvert}
+                  disabled={isConverting}
+                  className={`group flex items-center gap-2.5 px-6 py-3 rounded-xl text-base font-bold transition-all duration-300 ${
+                    isConverting
+                      ? "bg-blue-500/20 text-blue-400 cursor-wait"
+                      : "bg-gradient-to-r from-blue-500 to-cyan-600 text-white hover:shadow-[0_0_30px_rgba(59,130,246,0.35)] hover:scale-[1.03] active:scale-[0.97]"
+                  } disabled:opacity-40`}
+                >
+                  {isConverting ? "Converting..." : "Convert to PDF"}
+                </button>
+
+                <button
+                  onClick={handleClear}
+                  disabled={!file}
+                  className="flex items-center gap-2 px-4 py-3 rounded-xl glass text-sm font-bold text-muted-foreground hover:text-red-400 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="Clear file"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Clear</span>
+                </button>
+              </div>
             )}
           </div>
-
-          {/* Preview Area */}
-          {isRendered ? (
-            <div className="flex-1 bg-[#e8e8e8] overflow-auto flex justify-center py-6">
-              <div
-                ref={previewContainerRef}
-                className="docx-preview-container"
-              />
-            </div>
-          ) : (
-            <>
-              {/* Hidden container for rendering (docx-preview needs a DOM node) */}
-              <div
-                ref={previewContainerRef}
-                className="docx-preview-container"
-                style={{ display: isConverting ? "block" : "none", position: "absolute", left: "-9999px" }}
-              />
-              <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
-                {isConverting ? (
-                  <>
-                    <div className="w-20 h-20 rounded-3xl bg-surface border border-border flex items-center justify-center mb-6 shadow-xl">
-                      <div className="w-8 h-8 border-3 border-rose-400 border-t-transparent rounded-full animate-spin" />
-                    </div>
-                    <h3 className="text-xl font-bold text-white mb-2">Rendering Document...</h3>
-                    <p className="text-muted-foreground">
-                      Processing your Word document with high-fidelity rendering
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <div className="w-20 h-20 rounded-3xl bg-surface border border-border flex items-center justify-center mb-6 shadow-xl">
-                      <UploadCloud className="w-10 h-10 text-muted-foreground/50" />
-                    </div>
-                    <h3 className="text-xl font-bold text-white mb-2">Upload a Word Document</h3>
-                    <p className="text-muted-foreground mb-8 max-w-md">
-                      Select a .docx file from your computer to preview its contents and convert it into a beautifully formatted PDF.
-                    </p>
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 text-white font-bold hover:bg-white/10 transition-colors"
-                    >
-                      Browse Files
-                    </button>
-                  </>
-                )}
-              </div>
-            </>
-          )}
         </motion.div>
 
         {/* Info Bar */}
@@ -427,21 +390,22 @@ export default function WordToPdfPage() {
           transition={{ delay: 0.4 }}
           className="mt-8 flex items-start gap-3 p-5 rounded-xl glass text-sm text-muted-foreground"
         >
-          <Info className="w-5 h-5 mt-0.5 flex-shrink-0 text-rose-500" />
+          <Info className="w-5 h-5 mt-0.5 shrink-0 text-rose-500" />
           <div className="space-y-1">
             <p>
               <strong className="text-white">Privacy First:</strong> Your
-              documents are processed entirely in your browser. Nothing is sent to
-              any server.
+              documents are processed entirely in your browser. Nothing is sent
+              to any server.
             </p>
             <p>
-              <strong className="text-white">How it works:</strong>{" "}
-              Click &quot;Download PDF&quot; to open the print dialog. Select <strong className="text-white">&quot;Save as PDF&quot;</strong> as
-              the destination for a high-quality, text-selectable PDF with preserved formatting.
+              <strong className="text-white">How it works:</strong> Upload your
+              .docx file, click &quot;Convert to PDF&quot;, and then download
+              your converted PDF instantly.
             </p>
             <p>
-              <strong className="text-white">Supported formats:</strong>{" "}
-              Modern Word documents (.docx) with full support for text formatting, tables, images, headers, and page layouts.
+              <strong className="text-white">Supported formats:</strong> Modern
+              Word documents (.docx) with full support for text formatting,
+              tables, images, headers, and page layouts.
             </p>
           </div>
         </motion.div>
@@ -461,11 +425,11 @@ export default function WordToPdfPage() {
             {[
               {
                 q: "How do I convert Word to PDF?",
-                a: "Upload your .docx file using the 'Select Word Document' button, view the high-fidelity preview, then click 'Download PDF'. In the print dialog, select 'Save as PDF' as the destination.",
+                a: "Upload your .docx file, click 'Convert to PDF', and then download the resulting PDF. It's that simple!",
               },
               {
                 q: "Is the PDF text-selectable?",
-                a: "Yes! Unlike screenshot-based converters, this tool produces native PDFs where text remains selectable, searchable, and copy-pasteable.",
+                a: "Yes! The generated PDF preserves text as selectable, searchable, and copy-pasteable content. Your formatting, images, and layout are all preserved.",
               },
               {
                 q: "Is my data safe?",
