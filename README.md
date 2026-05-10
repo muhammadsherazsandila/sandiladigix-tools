@@ -111,10 +111,6 @@ Displays individual tool cards with icons, descriptions, and links to converter 
 
 All document conversions happen entirely on your device. Files are processed locally and never sent to any server.
 
-## 📝 License
-
-This project is open source and available under the MIT License.
-
 ## 👤 Author
 
 Created by [Muhammad Sheraz Sandila](https://github.com/muhammadsherazsandila)
